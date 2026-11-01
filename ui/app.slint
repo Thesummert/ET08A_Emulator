@@ -1,0 +1,213 @@
+import { Button, CheckBox, ComboBox, GroupBox, HorizontalBox, LineEdit, Slider, SpinBox, VerticalBox } from "std-widgets.slint";
+
+component AxisControl inherits HorizontalBox {
+    in property <string> label;
+    in-out property <int> value: 0;
+    changed value => { slider.value = root.value; }
+    spacing: 10px;
+    Text { text: root.label; min-width: 94px; }
+    slider := Slider {
+        minimum: -671; maximum: 670;
+        value: root.value;
+        changed(value) => { root.value = round(value); }
+    }
+    SpinBox { minimum: -671; maximum: 670; value <=> root.value; min-width: 104px; }
+}
+
+component StickPad inherits Rectangle {
+    in-out property <int> horizontal: 0;
+    in-out property <int> vertical: 0;
+    in property <bool> spring: true;
+    width: 216px; height: 216px;
+    background: #122130;
+    border-color: #405a70;
+    border-width: 1px;
+    border-radius: 14px;
+    property <length> travel: (self.width - 36px) / 2;
+    property <float> nx: root.horizontal / (root.horizontal < 0 ? 671 : 670);
+    property <float> ny: root.vertical / (root.vertical < 0 ? 671 : 670);
+
+    function read-pointer() {
+        let x = max(-1, min(1, (touch.mouse-x - root.width / 2) / root.travel));
+        let y = max(-1, min(1, (root.height / 2 - touch.mouse-y) / root.travel));
+        root.horizontal = round(x * (x < 0 ? 671 : 670));
+        root.vertical = round(y * (y < 0 ? 671 : 670));
+    }
+
+    Rectangle { x: parent.width / 2; y: 18px; width: 1px; height: parent.height - 36px; background: #405a70; }
+    Rectangle { x: 18px; y: parent.height / 2; width: parent.width - 36px; height: 1px; background: #405a70; }
+    Rectangle {
+        x: parent.width / 2 - self.width / 2 + root.nx * root.travel;
+        y: parent.height / 2 - self.height / 2 - root.ny * root.travel;
+        width: 28px; height: 28px;
+        border-radius: 14px;
+        background: touch.pressed ? #86efac : #38bdf8;
+        border-width: 3px;
+        border-color: #e0f2fe;
+    }
+    touch := TouchArea {
+        mouse-cursor: crosshair;
+        moved => { root.read-pointer(); }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.read-pointer();
+            }
+            if (event.kind == PointerEventKind.cancel ||
+                (event.button == PointerEventButton.left && event.kind == PointerEventKind.up)) {
+                if (root.spring) {
+                    root.horizontal = 0;
+                    root.vertical = 0;
+                }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "天地飞 ET08A 串口模拟器";
+    preferred-width: 1080px;
+    preferred-height: 870px;
+    min-width: 1000px;
+    min-height: 850px;
+    background: #eef3f8;
+    default-font-size: 14px;
+
+    in property <[string]> ports;
+    in-out property <string> port-name;
+    in-out property <int> hz: 70;
+    in-out property <int> left-x: 0;
+    in-out property <int> left-y: 0;
+    in-out property <int> right-x: 0;
+    in-out property <int> right-y: 0;
+    // Combo indices: SA/SD = Up, Down; SB/SC = Up, Middle, Down.
+    in-out property <int> sa: 0;
+    in-out property <int> sb: 0;
+    in-out property <int> sc: 0;
+    in-out property <int> sd: 0;
+    in-out property <bool> receiver-offline: false;
+    in-out property <bool> frame-lost: false;
+    in-out property <bool> failsafe: false;
+    in property <bool> running: false;
+    in property <bool> connected: false;
+    in property <string> status-text: "未连接 · 调整控件可预览帧数据";
+    in property <string> frame-hex;
+    in property <string> channel-text;
+    in property <string> frame-count: "0";
+    callback refresh-ports();
+    callback select-port(int);
+    callback toggle-send();
+
+    VerticalBox {
+        padding: 20px;
+        spacing: 12px;
+        HorizontalBox {
+            Text { text: "ET08A"; font-size: 30px; font-weight: 800; color: #122130; }
+            Text { text: "天地飞遥控器串口模拟器"; font-size: 19px; color: #405a70; }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text { text: "SBUS / 25 BYTE / 100000 8E2"; color: #405a70; }
+        }
+        GroupBox {
+            title: "串口连接";
+            VerticalBox {
+                HorizontalBox {
+                    ComboBox {
+                        model: root.ports;
+                        enabled: !root.running;
+                        min-width: 270px;
+                        selected(value) => { root.select-port(self.current-index); }
+                    }
+                    Button { text: "刷新串口"; enabled: !root.running; clicked => { root.refresh-ports(); } }
+                    LineEdit {
+                        text <=> root.port-name;
+                        placeholder-text: "COM3 / /dev/ttyUSB0";
+                        enabled: !root.running;
+                    }
+                    Text { text: "频率 Hz"; }
+                    SpinBox { minimum: 10; maximum: 100; value <=> root.hz; enabled: !root.running; }
+                    Button {
+                        text: root.running ? "停止发送" : "开始发送";
+                        primary: true;
+                        clicked => { root.toggle-send(); }
+                    }
+                }
+                Text {
+                    text: root.status-text;
+                    color: root.connected ? #15803d : #405a70;
+                    overflow: elide;
+                }
+            }
+        }
+        HorizontalBox {
+            spacing: 16px;
+            GroupBox {
+                title: "左摇杆 · CH4 水平 / CH3 竖直";
+                VerticalBox {
+                    alignment: start;
+                    HorizontalBox {
+                        alignment: center;
+                        StickPad {
+                            horizontal <=> root.left-x;
+                            vertical <=> root.left-y;
+                            spring: left-spring.checked;
+                        }
+                    }
+                    left-spring := CheckBox { text: "鼠标松开后回中"; checked: true; }
+                    AxisControl { label: "CH4 左水平"; value <=> root.left-x; }
+                    AxisControl { label: "CH3 左竖直"; value <=> root.left-y; }
+                }
+            }
+            GroupBox {
+                title: "右摇杆 · CH1 水平 / CH2 竖直";
+                VerticalBox {
+                    alignment: start;
+                    HorizontalBox {
+                        alignment: center;
+                        StickPad {
+                            horizontal <=> root.right-x;
+                            vertical <=> root.right-y;
+                            spring: right-spring.checked;
+                        }
+                    }
+                    right-spring := CheckBox { text: "鼠标松开后回中"; checked: true; }
+                    AxisControl { label: "CH1 右水平"; value <=> root.right-x; }
+                    AxisControl { label: "CH2 右竖直"; value <=> root.right-y; }
+                }
+            }
+        }
+        GroupBox {
+            title: "拨杆";
+            HorizontalBox {
+                Text { text: "SA · CH5"; }
+                ComboBox { model: ["上 · 1", "下 · 2"]; current-index <=> root.sa; }
+                Text { text: "SB · CH6"; }
+                ComboBox { model: ["上 · 1", "中 · 3", "下 · 2"]; current-index <=> root.sb; }
+                Text { text: "SC · CH7"; }
+                ComboBox { model: ["上 · 1", "中 · 3", "下 · 2"]; current-index <=> root.sc; }
+                Text { text: "SD · CH8"; }
+                ComboBox { model: ["上 · 1", "下 · 2"]; current-index <=> root.sd; }
+            }
+        }
+        HorizontalBox {
+            Button {
+                text: "四轴回中";
+                clicked => { root.left-x = 0; root.left-y = 0; root.right-x = 0; root.right-y = 0; }
+            }
+            CheckBox { text: "模拟接收器失联"; checked <=> root.receiver-offline; }
+            CheckBox { text: "Frame lost"; checked <=> root.frame-lost; }
+            CheckBox { text: "Failsafe"; checked <=> root.failsafe; }
+            Text { text: "已提交帧：" + root.frame-count; }
+        }
+        GroupBox {
+            title: "当前发送帧 · 未连接时仅预览";
+            VerticalBox {
+                Text { text: root.channel-text; color: #405a70; wrap: word-wrap; }
+                Text { text: root.frame-hex; color: #122130; wrap: word-wrap; font-size: 15px; }
+                Text {
+                    text: "摇杆偏移 -671…+670，原始值 353…1694，中位 1024；CH9…CH16 固定中位。";
+                    color: #405a70;
+                    font-size: 12px;
+                }
+            }
+        }
+    }
+}

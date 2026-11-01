@@ -1,0 +1,5 @@
+{
+  "name": "et08a-emulator",
+  "version-string": "0.1.0",
+  "dependencies": ["libserialport"]
+}
