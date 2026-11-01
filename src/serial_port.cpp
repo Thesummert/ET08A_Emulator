@@ -3,17 +3,44 @@
 #include <libserialport.h>
 #include <memory>
 #include <stdexcept>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 namespace et08 {
 namespace {
+#ifdef _WIN32
+// libserialport uses the Windows ANSI APIs, while Slint requires UTF-8.
+std::string convert_encoding(const std::string& input, UINT source, UINT destination) {
+    if (input.empty()) return {};
+    const int wide_size = MultiByteToWideChar(source, 0, input.data(), static_cast<int>(input.size()), nullptr, 0);
+    if (!wide_size) throw std::runtime_error("Could not decode serial port text");
+    std::wstring wide(static_cast<std::size_t>(wide_size), L'\0');
+    if (!MultiByteToWideChar(source, 0, input.data(), static_cast<int>(input.size()), wide.data(), wide_size))
+        throw std::runtime_error("Could not decode serial port text");
+    const int size = WideCharToMultiByte(destination, 0, wide.data(), wide_size, nullptr, 0, nullptr, nullptr);
+    if (!size) throw std::runtime_error("Could not encode serial port text");
+    std::string output(static_cast<std::size_t>(size), '\0');
+    if (!WideCharToMultiByte(destination, 0, wide.data(), wide_size, output.data(), size, nullptr, nullptr))
+        throw std::runtime_error("Could not encode serial port text");
+    return output;
+}
+std::string from_native(const std::string& value) { return convert_encoding(value, CP_ACP, CP_UTF8); }
+std::string to_native(const std::string& value) { return convert_encoding(value, CP_UTF8, CP_ACP); }
+#else
+std::string from_native(const std::string& value) { return value; }
+std::string to_native(const std::string& value) { return value; }
+#endif
+
 void check(sp_return result, const char* operation) {
     if (result >= SP_OK) return;
     std::string detail;
     if (result == SP_ERR_FAIL) {
-        char* message = sp_last_error_message();
+        const auto message = std::unique_ptr<char, decltype(&sp_free_error_message)>(
+            sp_last_error_message(), sp_free_error_message);
         if (message) {
-            detail = message;
-            sp_free_error_message(message);
+            detail = from_native(message.get());
         }
     } else if (result == SP_ERR_SUPP) detail = "Unsupported by this serial driver";
     else if (result == SP_ERR_ARG) detail = "Invalid serial argument";
@@ -29,7 +56,8 @@ std::vector<PortInfo> list_ports() {
     std::vector<PortInfo> ports;
     for (auto entry = list; *entry; ++entry) {
         const char* description = sp_get_port_description(*entry);
-        ports.push_back({sp_get_port_name(*entry), description ? description : ""});
+        const char* name = sp_get_port_name(*entry);
+        ports.push_back({from_native(name ? name : ""), from_native(description ? description : "")});
     }
     return ports;
 }
@@ -37,7 +65,8 @@ std::vector<PortInfo> list_ports() {
 void SerialPort::open(const std::string& port) {
     close();
     try {
-        check(sp_get_port_by_name(port.c_str(), &port_), "Find serial port");
+        const auto native_port = to_native(port);
+        check(sp_get_port_by_name(native_port.c_str(), &port_), "Find serial port");
         check(sp_open(port_, SP_MODE_WRITE), "Open serial port");
         opened_ = true;
         sp_port_config* config = nullptr;
