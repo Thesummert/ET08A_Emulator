@@ -175,4 +175,4 @@ ctest --test-dir build-core --output-on-failure
 
 [Slint C++ 构建文档](https://docs.slint.dev/latest/docs/cpp/cmake/)、[Slint 桌面后端依赖](https://docs.slint.dev/latest/docs/slint/guide/platforms/desktop/)、[libserialport 官方介绍](https://sigrok.org/wiki/Libserialport)、[SBUS 格式说明](https://github.com/bolderflight/sbus)。
 
-libserialport 使用 LGPL-3.0-or-later，Slint 提供多种许可选项；分发程序时请遵循所选依赖的许可证。
+本项目采用 [GNU GPL 3.0](LICENSE) 协议。使用 Slint 的 GPLv3 授权构建和分发程序；libserialport 使用 LGPL-3.0-or-later。分发时需同时遵循这些依赖及其第三方组件的许可证。
